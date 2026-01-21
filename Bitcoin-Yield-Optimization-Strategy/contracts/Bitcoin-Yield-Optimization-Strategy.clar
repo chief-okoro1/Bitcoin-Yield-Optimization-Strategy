@@ -404,3 +404,115 @@
     (ok true)
   )
 )
+
+;; Governance Proposals
+(define-map governance-proposals
+  {
+    proposal-id: uint
+  }
+  {
+    proposer: principal,
+    description: (string-ascii 200),
+    vote-count: uint,
+    is-active: bool,
+    created-at: uint
+  }
+)
+
+(define-public (vote-on-proposal
+  (proposal-id uint)
+)
+  (begin
+    (let ((proposal (unwrap! 
+      (map-get? governance-proposals { proposal-id: proposal-id }) 
+      ERR-UNAUTHORIZED
+    )))
+      (asserts! (get is-active proposal) ERR-UNAUTHORIZED)
+      
+      ;; Increment vote count
+      (map-set governance-proposals 
+        { proposal-id: proposal-id }
+        (merge proposal 
+          { vote-count: (+ (get vote-count proposal) u1) }
+        )
+      )
+    )
+    (ok true)
+  )
+)
+
+;; Referral Program
+(define-map referrals
+  {
+    referrer: principal,
+    referee: principal
+  }
+  {
+    is-active: bool,
+    reward: uint
+  }
+)
+
+(define-public (refer-user
+  (referee principal)
+)
+  (begin
+    (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-UNAUTHORIZED)
+    
+    (map-set referrals 
+      { referrer: tx-sender, referee: referee }
+      { is-active: true, reward: u10 } ;; Example reward
+    )
+    
+    (ok true)
+  )
+)
+
+;; Time-Locked Deposits
+(define-map time-locked-deposits
+  {
+    user: principal,
+    platform-id: uint
+  }
+  {
+    amount: uint,
+    unlock-time: uint
+  }
+)
+
+(define-public (lock-deposit
+  (amount uint)
+  (platform-id uint)
+  (duration uint)
+)
+  (begin
+    (try! (stx-transfer? 
+      amount 
+      tx-sender 
+      (as-contract tx-sender)
+    ))
+    
+    (map-set time-locked-deposits
+      { user: tx-sender, platform-id: platform-id }
+      {
+        amount: amount,
+        unlock-time: (+ stacks-block-height duration)
+      }
+    )
+    
+    (ok true)
+  )
+)
+
+;; User Notifications
+(define-map user-notifications
+  {
+    user: principal,
+    notification-id: uint
+  }
+  {
+    message: (string-ascii 200),
+    is-read: bool,
+    created-at: uint
+  }
+)
