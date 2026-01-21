@@ -248,3 +248,159 @@
     assigned-at: uint
   }
 )
+
+;; Upgradability and Versioning
+(define-data-var contract-version uint u2)
+(define-data-var upgrade-timestamp uint u0)
+
+;; Staking and Rewards Mechanism
+(define-map staking-rewards
+  {
+    user: principal,
+    platform-id: uint
+  }
+  {
+    total-staked: uint,
+    reward-rate: uint,
+    last-claim-time: uint
+  }
+)
+
+;; NFT Position Tracking
+(define-non-fungible-token position-token uint)
+
+;; Whitelisting and KYC Integration
+(define-map user-whitelist
+  { user: principal }
+  {
+    is-verified: bool,
+    kyc-level: uint,
+    verification-timestamp: uint
+  }
+)
+
+;; Advanced Fee Management
+(define-map fee-tiers
+  { tier: uint }
+  {
+    min-deposit: uint,
+    max-deposit: uint,
+    fee-percentage: uint
+  }
+)
+
+;; Liquidation Protection
+(define-map liquidation-protection
+  { user: principal }
+  {
+    protection-amount: uint,
+    expires-at: uint
+  }
+)
+
+;; Whitelisting Function
+(define-public (add-to-whitelist
+  (user principal)
+  (kyc-level uint)
+)
+  (begin
+    (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-UNAUTHORIZED)
+    
+    (map-set user-whitelist 
+      { user: user }
+      {
+        is-verified: true,
+        kyc-level: kyc-level,
+        verification-timestamp: stacks-block-height
+      }
+    )
+    
+    (ok true)
+  )
+)
+
+;; Liquidation Protection Purchase
+(define-public (purchase-liquidation-protection
+  (protection-amount uint)
+  (duration uint)
+)
+  (begin
+    (try! (stx-transfer? 
+      protection-amount 
+      tx-sender 
+      (as-contract tx-sender)
+    ))
+    
+    (map-set liquidation-protection
+      { user: tx-sender }
+      {
+        protection-amount: protection-amount,
+        expires-at: (+ stacks-block-height duration)
+      }
+    )
+    
+    (ok true)
+  )
+)
+
+;; Constants for New Features
+(define-constant MIN-GOVERNANCE-VOTES u3)
+(define-constant EMERGENCY-WITHDRAWAL-FEE u5)
+
+;; Emergency Withdrawal Functionality
+(define-public (emergency-withdraw
+  (platform-id uint)
+)
+  (begin
+    (asserts! (var-get emergency-mode) ERR-EMERGENCY-LOCK)
+    
+    (let 
+      (
+        (user-position (unwrap! 
+          (map-get? user-positions { user: tx-sender }) 
+          ERR-UNAUTHORIZED
+        ))
+        (current-platform (unwrap! 
+          (map-get? yield-platforms { platform-id: platform-id }) 
+          ERR-UNAUTHORIZED
+        ))
+      )
+      
+      ;; Calculate total amount to withdraw
+      (let 
+        ((total-amount (get total-deposited user-position)))
+        
+        ;; Transfer funds back with emergency fee
+        (try! (stx-transfer? 
+          (- total-amount EMERGENCY-WITHDRAWAL-FEE) 
+          (as-contract tx-sender) 
+          tx-sender
+        ))
+        
+        ;; Update user position
+        (map-set user-positions 
+          { user: tx-sender }
+          (merge user-position 
+            { 
+              total-deposited: u0 
+            }
+          )
+        )
+        
+        ;; Update platform liquidity
+        (map-set yield-platforms 
+          { platform-id: platform-id }
+          (merge current-platform 
+            { 
+              total-liquidity: (- 
+                (get total-liquidity current-platform) 
+                total-amount
+              )
+            }
+          )
+        )
+      )
+    )
+    (ok true)
+  )
+)
